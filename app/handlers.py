@@ -4,8 +4,19 @@ from aiogram.types import Message
 
 from app.config import ALLOWED_USER_ID
 from app.runner import format_report, run_checks
+from app.storage import get_flaky, get_recent_runs, save_run
 
 router = Router()
+
+
+def is_allowed(message: Message) -> bool:
+    return message.from_user is not None and message.from_user.id == ALLOWED_USER_ID
+
+
+def format_run_line(run: dict) -> str:
+    ok = run["failed"] == 0 and run["errors"] == 0
+    icon = "✅" if ok else "❌"
+    return f'#{run["id"]} {run["created_at"]} {icon} {run["passed"]}/{run["total"]}, {run["duration"]:.1f} с'
 
 
 @router.message(Command("start"))
@@ -15,7 +26,10 @@ async def cmd_start(message: Message):
         "Команды:\n"
         "/ping - проверка связи\n"
         "/id - узнать свой Telegram ID\n"
-        "/run_api - запустить API-проверки"
+        "/run_api - запустить API-проверки\n"
+        "/last - последний прогон\n"
+        "/history - последние 5 прогонов\n"
+        "/flaky - нестабильные проверки"
     )
 
 
@@ -31,9 +45,50 @@ async def cmd_id(message: Message):
 
 @router.message(Command("run_api"))
 async def cmd_run_api(message: Message):
-    if message.from_user.id != ALLOWED_USER_ID:
+    if not is_allowed(message):
         await message.answer("Нет доступа.")
         return
     await message.answer("Запускаю API-проверки, это займёт несколько секунд...")
     result = await run_checks("checks/api")
+    if not result.crashed and result.total > 0:
+        save_run("checks/api", result)
     await message.answer(format_report(result))
+
+
+@router.message(Command("last"))
+async def cmd_last(message: Message):
+    if not is_allowed(message):
+        await message.answer("Нет доступа.")
+        return
+    runs = get_recent_runs(1)
+    if not runs:
+        await message.answer("Прогонов пока нет. Запусти /run_api")
+        return
+    await message.answer(format_run_line(runs[0]))
+
+
+@router.message(Command("history"))
+async def cmd_history(message: Message):
+    if not is_allowed(message):
+        await message.answer("Нет доступа.")
+        return
+    runs = get_recent_runs(5)
+    if not runs:
+        await message.answer("Прогонов пока нет. Запусти /run_api")
+        return
+    await message.answer("\n".join(format_run_line(run) for run in runs))
+
+
+@router.message(Command("flaky"))
+async def cmd_flaky(message: Message):
+    if not is_allowed(message):
+        await message.answer("Нет доступа.")
+        return
+    items = get_flaky(10)
+    if not items:
+        await message.answer("Нестабильных проверок не найдено (последние 10 прогонов).")
+        return
+    lines = ["Нестабильные проверки (последние 10 прогонов):"]
+    for item in items:
+        lines.append(f'- {item["test_name"]}: прошла {item["passed"]}, упала {item["failed"]}')
+    await message.answer("\n".join(lines))

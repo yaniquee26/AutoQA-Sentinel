@@ -9,6 +9,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 @dataclass
+class CaseResult:
+    name: str
+    outcome: str  # passed / failed / error / skipped
+    message: str = ""
+
+
+@dataclass
 class RunResult:
     total: int = 0
     passed: int = 0
@@ -16,9 +23,13 @@ class RunResult:
     errors: int = 0
     skipped: int = 0
     duration: float = 0.0
-    failures: list[str] = field(default_factory=list)
+    cases: list[CaseResult] = field(default_factory=list)
     crashed: bool = False
     crash_message: str = ""
+
+    @property
+    def failures(self) -> list[str]:
+        return [f"{c.name}: {c.message}" for c in self.cases if c.outcome in ("failed", "error")]
 
 
 def parse_junit(xml_path: Path) -> RunResult:
@@ -32,14 +43,16 @@ def parse_junit(xml_path: Path) -> RunResult:
         result.duration += float(suite.get("time", 0))
     result.passed = result.total - result.failed - result.errors - result.skipped
     for case in root.iter("testcase"):
-        problem = case.find("failure")
-        if problem is None:
-            problem = case.find("error")
-        if problem is not None:
-            name = f"{case.get('classname')}::{case.get('name')}"
-            lines = (problem.get("message") or "").splitlines()
-            message = lines[0][:150] if lines else ""
-            result.failures.append(f"{name}: {message}")
+        name = f"{case.get('classname')}::{case.get('name')}"
+        outcome, message = "passed", ""
+        for tag, label in (("failure", "failed"), ("error", "error"), ("skipped", "skipped")):
+            node = case.find(tag)
+            if node is not None:
+                outcome = label
+                lines = (node.get("message") or "").splitlines()
+                message = lines[0][:150] if lines else ""
+                break
+        result.cases.append(CaseResult(name, outcome, message))
     return result
 
 
