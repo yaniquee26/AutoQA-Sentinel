@@ -16,7 +16,8 @@ def is_allowed(message: Message) -> bool:
 def format_run_line(run: dict) -> str:
     ok = run["failed"] == 0 and run["errors"] == 0
     icon = "✅" if ok else "❌"
-    return f'#{run["id"]} {run["created_at"]} {icon} {run["passed"]}/{run["total"]}, {run["duration"]:.1f} с'
+    target = run["target"].split("/")[-1]
+    return f'#{run["id"]} {target} {run["created_at"]} {icon} {run["passed"]}/{run["total"]}, {run["duration"]:.1f} с'
 
 
 @router.message(Command("start"))
@@ -27,6 +28,7 @@ async def cmd_start(message: Message):
         "/ping - проверка связи\n"
         "/id - узнать свой Telegram ID\n"
         "/run_api - запустить API-проверки\n"
+        "/run_ui - запустить UI-проверки\n"
         "/last - последний прогон\n"
         "/history - последние 5 прогонов\n"
         "/flaky - нестабильные проверки"
@@ -43,16 +45,25 @@ async def cmd_id(message: Message):
     await message.answer(f"Твой Telegram ID: {message.from_user.id}")
 
 
-@router.message(Command("run_api"))
-async def cmd_run_api(message: Message):
+async def run_target(message: Message, target: str, title: str):
     if not is_allowed(message):
         await message.answer("Нет доступа.")
         return
-    await message.answer("Запускаю API-проверки, это займёт несколько секунд...")
-    result = await run_checks("checks/api")
+    await message.answer(f"Запускаю {title}, это займёт некоторое время...")
+    result = await run_checks(target)
     if not result.crashed and result.total > 0:
-        save_run("checks/api", result)
+        save_run(target, result)
     await message.answer(format_report(result))
+
+
+@router.message(Command("run_api"))
+async def cmd_run_api(message: Message):
+    await run_target(message, "checks/api", "API-проверки")
+
+
+@router.message(Command("run_ui"))
+async def cmd_run_ui(message: Message):
+    await run_target(message, "checks/ui", "UI-проверки")
 
 
 @router.message(Command("last"))
