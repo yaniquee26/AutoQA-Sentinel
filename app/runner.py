@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -6,6 +7,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+SECRET_NAMES = {"BOT_TOKEN", "ALLOWED_USER_ID"}
+
+def clean_env() -> dict:
+    return {k: v for k, v in os.environ.items() if k not in SECRET_NAMES}
 
 
 @dataclass
@@ -65,6 +71,7 @@ async def run_checks(target: str = "checks/api", timeout: int = 120) -> RunResul
             cwd=PROJECT_ROOT,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            env=clean_env()
         )
         try:
             output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
