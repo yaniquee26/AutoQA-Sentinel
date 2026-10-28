@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shutil
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -7,8 +8,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ARTIFACTS_DIR = PROJECT_ROOT / "artifacts" / "last_run"
 
 SECRET_NAMES = {"BOT_TOKEN", "ALLOWED_USER_ID"}
+
 
 def clean_env() -> dict:
     return {k: v for k, v in os.environ.items() if k not in SECRET_NAMES}
@@ -30,6 +33,7 @@ class RunResult:
     skipped: int = 0
     duration: float = 0.0
     cases: list[CaseResult] = field(default_factory=list)
+    screenshots: list[Path] = field(default_factory=list)
     crashed: bool = False
     crash_message: str = ""
 
@@ -63,15 +67,19 @@ def parse_junit(xml_path: Path) -> RunResult:
 
 
 async def run_checks(target: str = "checks/api", timeout: int = 120) -> RunResult:
+    shutil.rmtree(ARTIFACTS_DIR, ignore_errors=True)
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         xml_path = Path(tmp) / "report.xml"
         process = await asyncio.create_subprocess_exec(
             sys.executable, "-m", "pytest", target,
             f"--junitxml={xml_path}", "-q", "--tb=short",
+            "--screenshot", "only-on-failure",
+            "--output", str(ARTIFACTS_DIR),
             cwd=PROJECT_ROOT,
+            env=clean_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env=clean_env()
         )
         try:
             output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
@@ -82,7 +90,9 @@ async def run_checks(target: str = "checks/api", timeout: int = 120) -> RunResul
         if not xml_path.exists():
             tail = output.decode(errors="replace")[-500:]
             return RunResult(crashed=True, crash_message=tail)
-        return parse_junit(xml_path)
+        result = parse_junit(xml_path)
+        result.screenshots = sorted(ARTIFACTS_DIR.rglob("*.png"))[:3]
+        return result
 
 
 def format_report(result: RunResult) -> str:
