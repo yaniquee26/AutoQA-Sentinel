@@ -66,16 +66,17 @@ def parse_junit(xml_path: Path) -> RunResult:
     return result
 
 
-async def run_checks(target: str = "checks/api", timeout: int = 120) -> RunResult:
-    shutil.rmtree(ARTIFACTS_DIR, ignore_errors=True)
-    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+async def run_pytest(targets: list[str], out_dir: Path, timeout: int = 120) -> RunResult:
+    """Один запуск pytest в чистом окружении; out_dir очищается и получает скриншоты."""
+    shutil.rmtree(out_dir, ignore_errors=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         xml_path = Path(tmp) / "report.xml"
         process = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "pytest", target,
+            sys.executable, "-m", "pytest", *targets,
             f"--junitxml={xml_path}", "-q", "--tb=short",
             "--screenshot", "only-on-failure",
-            "--output", str(ARTIFACTS_DIR),
+            "--output", str(out_dir),
             cwd=PROJECT_ROOT,
             env=clean_env(),
             stdout=asyncio.subprocess.PIPE,
@@ -91,8 +92,12 @@ async def run_checks(target: str = "checks/api", timeout: int = 120) -> RunResul
             tail = output.decode(errors="replace")[-500:]
             return RunResult(crashed=True, crash_message=tail)
         result = parse_junit(xml_path)
-        result.screenshots = sorted(ARTIFACTS_DIR.rglob("*.png"))[:3]
+        result.screenshots = sorted(out_dir.rglob("*.png"))[:3]
         return result
+
+
+async def run_checks(target: str = "checks/api", timeout: int = 120) -> RunResult:
+    return await run_pytest([target], ARTIFACTS_DIR, timeout)
 
 
 def format_report(result: RunResult) -> str:

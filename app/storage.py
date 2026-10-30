@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.runner import RunResult
+from app.triage import TriageItem
 
 DB_PATH = Path(__file__).resolve().parent.parent / "sentinel.db"
 
@@ -24,6 +25,14 @@ CREATE TABLE IF NOT EXISTS case_results (
     test_name TEXT NOT NULL,
     outcome TEXT NOT NULL,
     message TEXT
+);
+CREATE TABLE IF NOT EXISTS triage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES runs(id),
+    test_name TEXT NOT NULL,
+    verdict TEXT NOT NULL,
+    cause TEXT,
+    attempts TEXT NOT NULL
 );
 """
 
@@ -80,3 +89,25 @@ def get_flaky(last_runs: int = 10, db_path: Path = DB_PATH) -> list[dict]:
     """
     with _connect(db_path) as conn:
         return [dict(row) for row in conn.execute(query, (last_runs,))]
+
+
+def save_triage(run_id: int, items: list[TriageItem], db_path: Path = DB_PATH) -> None:
+    with _connect(db_path) as conn:
+        conn.executemany(
+            "INSERT INTO triage (run_id, test_name, verdict, cause, attempts) VALUES (?, ?, ?, ?, ?)",
+            [(run_id, i.name, i.verdict, i.cause, ",".join(i.attempts)) for i in items],
+        )
+
+
+def get_fail_rate(test_name: str, target: str, last_runs: int = 10, db_path: Path = DB_PATH) -> tuple[int, int]:
+    """(упала раз, всего раз) за последние last_runs прогонов этого target."""
+    query = """
+        SELECT COUNT(*) AS total,
+               COALESCE(SUM(outcome IN ('failed', 'error')), 0) AS failed
+        FROM case_results
+        WHERE test_name = ?
+          AND run_id IN (SELECT id FROM runs WHERE target = ? ORDER BY id DESC LIMIT ?)
+    """
+    with _connect(db_path) as conn:
+        row = conn.execute(query, (test_name, target, last_runs)).fetchone()
+    return int(row["failed"]), int(row["total"])

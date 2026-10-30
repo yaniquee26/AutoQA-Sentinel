@@ -12,7 +12,8 @@ from aiogram.types import (
 
 from app.config import ALLOWED_USER_ID
 from app.runner import format_report, run_checks
-from app.storage import get_flaky, get_recent_runs, save_run
+from app.storage import get_fail_rate, get_flaky, get_recent_runs, save_run, save_triage
+from app.triage import TriageItem, format_triage, triage_failures
 
 router = Router()
 RUN_LOCK = asyncio.Lock()
@@ -72,14 +73,24 @@ async def run_target(message: Message, user_id: int, target: str, title: str):
     if RUN_LOCK.locked():
         await message.answer("Уже идёт другой прогон, подожди его окончания.")
         return
+    triage: list[TriageItem] = []
     async with RUN_LOCK:
         await message.answer(f"Запускаю {title}, это займёт некоторое время...")
         result = await run_checks(target)
         if not result.crashed and result.total > 0:
-            save_run(target, result)
+            run_id = save_run(target, result)
+            if result.failures:
+                await message.answer("Есть падения, перезапускаю их, чтобы понять причину...")
+                triage = await triage_failures(result)
+                save_triage(run_id, triage)
+                for item in triage:
+                    item.history_failed, item.history_total = get_fail_rate(item.name, target)
     for path in result.screenshots:
         await message.answer_photo(FSInputFile(path), caption=path.parent.name[:200])
-    await message.answer(format_report(result), reply_markup=main_keyboard())
+    report = format_report(result)
+    if triage:
+        report += "\n\n" + format_triage(triage)
+    await message.answer(report[:4000], reply_markup=main_keyboard())
 
 
 async def run_from_callback(callback: CallbackQuery, target: str, title: str):
