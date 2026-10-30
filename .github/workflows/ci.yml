@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Chromium for Playwright
+        run: python -m playwright install --with-deps chromium
+
+      - name: Service tests
+        run: pytest tests
+
+      # Проверка скорости нестабильна по замыслу (порог 0.3 с), она нужна для демонстрации
+      # разбора падений в боте, поэтому в CI её пропускаем.
+      - name: API checks
+        run: pytest checks/api --deselect checks/api/test_timing.py::test_user_response_is_fast
+
+      - name: UI checks
+        run: pytest checks/ui
