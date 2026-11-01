@@ -1,4 +1,4 @@
-from app.runner import CaseResult, RunResult, clean_env, format_report, parse_junit
+from app.runner import CaseResult, RunResult, clean_env, collect_artifacts, format_report, parse_junit
 
 XML = """<?xml version="1.0" encoding="utf-8"?>
 <testsuites>
@@ -50,3 +50,27 @@ def test_format_report_for_failed_run():
 
     assert "Есть падения" in text
     assert "suite::bad: boom" in text
+
+
+def test_collect_artifacts_finds_screenshots_and_traces(tmp_path):
+    test_dir = tmp_path / "checks-ui-test-x-chromium"
+    test_dir.mkdir()
+    (test_dir / "test-failed-1.png").write_bytes(b"png")
+    (test_dir / "trace.zip").write_bytes(b"zip")
+    (test_dir / "notes.txt").write_text("ignore me")
+
+    screenshots, traces = collect_artifacts(tmp_path)
+
+    assert [p.name for p in screenshots] == ["test-failed-1.png"]
+    assert [p.name for p in traces] == ["trace.zip"]
+
+
+def test_collect_artifacts_respects_limit(tmp_path):
+    for i in range(5):
+        folder = tmp_path / f"case{i}"
+        folder.mkdir()
+        (folder / "trace.zip").write_bytes(b"zip")
+
+    _, traces = collect_artifacts(tmp_path, limit=3)
+
+    assert len(traces) == 3

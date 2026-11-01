@@ -8,7 +8,7 @@ from app.runner import CaseResult, RunResult
 from app.storage import get_fail_rate, init_db, save_run, save_triage
 from app.triage import (
     VERDICT_BUG, VERDICT_FLAKY, VERDICT_UNKNOWN,
-    TriageItem, case_nodeid, classify, format_triage, guess_cause, triage_failures,
+    TriageItem, case_nodeid, classify, format_flaky, format_triage, guess_cause, triage_failures,
 )
 
 
@@ -98,3 +98,22 @@ def test_save_triage_and_fail_rate(tmp_path: Path):
     save_triage(run_id, [TriageItem("m::test_a", ["failed", "passed"], VERDICT_FLAKY, "x")], db)
     assert get_fail_rate("m::test_a", "checks/api", 10, db) == (2, 3)
     assert get_fail_rate("m::test_a", "checks/ui", 10, db) == (0, 0)
+
+
+def test_format_flaky_separates_flaky_and_stable_failures():
+    items = [
+        {"test_name": "m::test_slow", "flaky": 5, "bug": 0},
+        {"test_name": "m::test_broken[chromium]", "flaky": 0, "bug": 2},
+    ]
+    text = format_flaky(items)
+    assert "Нестабильные" in text and "test_slow: падение пропадало при перезапуске в 5 из 5" in text
+    assert "Стабильно падали" in text and "test_broken[chromium]: случаев 2" in text
+
+
+def test_format_flaky_mixed_history_counts_all_failures():
+    text = format_flaky([{"test_name": "m::test_a", "flaky": 2, "bug": 1}])
+    assert "в 2 из 3" in text and "Стабильно падали" not in text
+
+
+def test_format_flaky_empty():
+    assert "не было" in format_flaky([])

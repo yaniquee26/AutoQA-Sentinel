@@ -34,6 +34,7 @@ class RunResult:
     duration: float = 0.0
     cases: list[CaseResult] = field(default_factory=list)
     screenshots: list[Path] = field(default_factory=list)
+    traces: list[Path] = field(default_factory=list)
     crashed: bool = False
     crash_message: str = ""
 
@@ -66,6 +67,14 @@ def parse_junit(xml_path: Path) -> RunResult:
     return result
 
 
+def collect_artifacts(out_dir: Path, limit: int = 3) -> tuple[list[Path], list[Path]]:
+    """Скриншоты (*.png) и trace Playwright (trace.zip) упавших проверок."""
+    return (
+        sorted(out_dir.rglob("*.png"))[:limit],
+        sorted(out_dir.rglob("trace.zip"))[:limit],
+    )
+
+
 async def run_pytest(targets: list[str], out_dir: Path, timeout: int = 120) -> RunResult:
     """Один запуск pytest в чистом окружении; out_dir очищается и получает скриншоты."""
     shutil.rmtree(out_dir, ignore_errors=True)
@@ -76,6 +85,7 @@ async def run_pytest(targets: list[str], out_dir: Path, timeout: int = 120) -> R
             sys.executable, "-m", "pytest", *targets,
             f"--junitxml={xml_path}", "-q", "--tb=short",
             "--screenshot", "only-on-failure",
+            "--tracing", "retain-on-failure",
             "--output", str(out_dir),
             cwd=PROJECT_ROOT,
             env=clean_env(),
@@ -92,7 +102,7 @@ async def run_pytest(targets: list[str], out_dir: Path, timeout: int = 120) -> R
             tail = output.decode(errors="replace")[-500:]
             return RunResult(crashed=True, crash_message=tail)
         result = parse_junit(xml_path)
-        result.screenshots = sorted(out_dir.rglob("*.png"))[:3]
+        result.screenshots, result.traces = collect_artifacts(out_dir)
         return result
 
 

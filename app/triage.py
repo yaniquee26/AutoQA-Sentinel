@@ -123,3 +123,24 @@ def format_triage(items: list[TriageItem], limit: int = 5) -> str:
     if len(items) > limit:
         lines += ["", f"…и ещё {len(items) - limit}"]
     return "\n".join(lines)
+
+
+def format_flaky(items: list[dict], last_runs: int = 10) -> str:
+    """Текст для /flaky: нестабильные (падение пропало при перезапуске) и стабильно падающие."""
+    flaky = [i for i in items if i["flaky"] > 0]
+    bugs = [i for i in items if i["flaky"] == 0 and i["bug"] > 0]
+    if not flaky and not bugs:
+        return f"Падений с разбором за последние {last_runs} прогонов не было."
+    lines: list[str] = []
+    if flaky:
+        lines.append(f"🔥 Нестабильные (последние {last_runs} прогонов каждого типа):")
+        for i in flaky:
+            total = i["flaky"] + i["bug"]
+            lines.append(f"- {i['test_name'].split('::')[-1]}: падение пропадало при перезапуске в {i['flaky']} из {total}")
+    if bugs:
+        if lines:
+            lines.append("")
+        lines.append("🐞 Стабильно падали (во всех попытках):")
+        for i in bugs:
+            lines.append(f"- {i['test_name'].split('::')[-1]}: случаев {i['bug']}")
+    return "\n".join(lines)

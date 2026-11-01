@@ -12,11 +12,12 @@ from aiogram.types import (
 
 from app.config import ALLOWED_USER_ID
 from app.runner import format_report, run_checks
-from app.storage import get_fail_rate, get_flaky, get_recent_runs, save_run, save_triage
-from app.triage import TriageItem, format_triage, triage_failures
+from app.storage import get_fail_rate, get_flaky_verdicts, get_recent_runs, save_run, save_triage
+from app.triage import TriageItem, format_flaky, format_triage, triage_failures
 
 router = Router()
 RUN_LOCK = asyncio.Lock()
+MAX_TRACE_BYTES = 45 * 1024 * 1024  # лимит Telegram для файлов бота: 50 МБ
 
 
 def is_allowed(user_id: int) -> bool:
@@ -57,13 +58,7 @@ def history_text() -> str:
 
 
 def flaky_text() -> str:
-    items = get_flaky(10)
-    if not items:
-        return "Нестабильных проверок не найдено (последние 10 прогонов)."
-    lines = ["Нестабильные проверки (последние 10 прогонов):"]
-    for item in items:
-        lines.append(f'- {item["test_name"]}: прошла {item["passed"]}, упала {item["failed"]}')
-    return "\n".join(lines)
+    return format_flaky(get_flaky_verdicts(10))
 
 
 async def run_target(message: Message, user_id: int, target: str, title: str):
@@ -87,6 +82,10 @@ async def run_target(message: Message, user_id: int, target: str, title: str):
                     item.history_failed, item.history_total = get_fail_rate(item.name, target)
     for path in result.screenshots:
         await message.answer_photo(FSInputFile(path), caption=path.parent.name[:200])
+    for path in result.traces:
+        if path.stat().st_size <= MAX_TRACE_BYTES:
+            caption = f"Trace Playwright, открой на trace.playwright.dev\n{path.parent.name}"
+            await message.answer_document(FSInputFile(path), caption=caption[:200])
     report = format_report(result)
     if triage:
         report += "\n\n" + format_triage(triage)

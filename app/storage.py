@@ -76,16 +76,26 @@ def get_recent_runs(limit: int = 5, db_path: Path = DB_PATH) -> list[dict]:
         return [dict(row) for row in rows]
 
 
-def get_flaky(last_runs: int = 10, db_path: Path = DB_PATH) -> list[dict]:
+def get_flaky_verdicts(last_runs: int = 10, db_path: Path = DB_PATH) -> list[dict]:
+    """Итоги разбора падений за последние last_runs прогонов каждого target.
+
+    flaky: сколько раз падение исчезло при перезапуске;
+    bug: сколько раз проверка упала во всех попытках.
+    """
     query = """
-        SELECT test_name,
-               SUM(outcome = 'passed') AS passed,
-               SUM(outcome IN ('failed', 'error')) AS failed
-        FROM case_results
-        WHERE run_id IN (SELECT id FROM runs ORDER BY id DESC LIMIT ?)
-        GROUP BY test_name
-        HAVING passed > 0 AND failed > 0
-        ORDER BY failed DESC
+        SELECT t.test_name,
+               SUM(t.verdict = 'flaky') AS flaky,
+               SUM(t.verdict = 'bug') AS bug
+        FROM triage t
+        WHERE t.run_id IN (
+            SELECT id FROM (
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY target ORDER BY id DESC) AS rn
+                FROM runs
+            ) WHERE rn <= ?
+        )
+        GROUP BY t.test_name
+        HAVING flaky > 0 OR bug > 0
+        ORDER BY flaky DESC, bug DESC, t.test_name
     """
     with _connect(db_path) as conn:
         return [dict(row) for row in conn.execute(query, (last_runs,))]
