@@ -32,6 +32,12 @@ Telegram-бот для запуска автотестов с телефона. 
 
 ![Объяснение падения](docs/images/explain.png)
 
+**Видеодемонстрация работы бота**
+
+https://github.com/user-attachments/assets/44e25f0c-07ce-43e3-a0e9-96ced18e3086
+
+https://github.com/user-attachments/assets/54c31f69-60ee-4d12-896a-b8cae8b7e6f3
+
 ## Что умеет
 
 | Команда / кнопка | Что делает |
