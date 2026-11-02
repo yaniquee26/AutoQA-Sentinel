@@ -16,12 +16,14 @@ XML = """<?xml version="1.0" encoding="utf-8"?>
 def test_clean_env_removes_secrets_and_keeps_the_rest(monkeypatch):
     monkeypatch.setenv("BOT_TOKEN", "secret")
     monkeypatch.setenv("ALLOWED_USER_ID", "42")
+    monkeypatch.setenv("LLM_API_KEY", "gsk_secret")
     monkeypatch.setenv("SOME_SETTING", "keep")
 
     env = clean_env()
 
     assert "BOT_TOKEN" not in env
     assert "ALLOWED_USER_ID" not in env
+    assert "LLM_API_KEY" not in env
     assert env["SOME_SETTING"] == "keep"
 
 
@@ -74,3 +76,4 @@ def test_collect_artifacts_respects_limit(tmp_path):
     _, traces = collect_artifacts(tmp_path, limit=3)
 
     assert len(traces) == 3
+

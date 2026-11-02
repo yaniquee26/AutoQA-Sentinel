@@ -84,3 +84,32 @@ def test_no_triage_means_empty_list(tmp_path):
     save_run("checks/api", make_result("failed"), db)
 
     assert get_flaky_verdicts(10, db) == []
+
+
+def test_last_triage_returns_only_the_latest_run_with_error_text(tmp_path):
+    db = tmp_path / "test.db"
+    init_db(db)
+
+    first = save_run("checks/api", make_result("failed"), db)
+    save_triage(first, [triage_item("flaky")], db)
+    second = save_run("checks/ui", RunResult(total=1, failed=1, cases=[CaseResult("suite::sometimes_bad", "failed", "boom")]), db)
+    save_triage(second, [triage_item("bug")], db)
+    save_run("checks/api", make_result("passed"), db)  # прогон без падений не считается
+
+    from app.storage import get_last_triage
+
+    rows = get_last_triage(db)
+
+    assert len(rows) == 1
+    assert (rows[0]["verdict"], rows[0]["target"], rows[0]["message"]) == ("bug", "checks/ui", "boom")
+    assert rows[0]["attempts"] == "failed,failed,failed"
+
+
+def test_last_triage_is_empty_without_failures(tmp_path):
+    from app.storage import get_last_triage
+
+    db = tmp_path / "test.db"
+    init_db(db)
+    save_run("checks/api", make_result("passed"), db)
+
+    assert get_last_triage(db) == []

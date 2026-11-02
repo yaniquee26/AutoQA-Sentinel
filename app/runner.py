@@ -10,7 +10,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts" / "last_run"
 
-SECRET_NAMES = {"BOT_TOKEN", "ALLOWED_USER_ID"}
+SECRET_NAMES = {"BOT_TOKEN", "ALLOWED_USER_ID", "LLM_API_KEY"}
 
 
 def clean_env() -> dict:

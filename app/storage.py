@@ -121,3 +121,17 @@ def get_fail_rate(test_name: str, target: str, last_runs: int = 10, db_path: Pat
     with _connect(db_path) as conn:
         row = conn.execute(query, (test_name, target, last_runs)).fetchone()
     return int(row["failed"]), int(row["total"])
+
+
+def get_last_triage(db_path: Path = DB_PATH) -> list[dict]:
+    """Результаты разбора последнего прогона, в котором были падения (с текстом ошибки)."""
+    query = """
+        SELECT t.test_name, t.verdict, t.cause, t.attempts, r.target, c.message
+        FROM triage t
+        JOIN runs r ON r.id = t.run_id
+        LEFT JOIN case_results c ON c.run_id = t.run_id AND c.test_name = t.test_name
+        WHERE t.run_id = (SELECT MAX(run_id) FROM triage)
+        ORDER BY t.id
+    """
+    with _connect(db_path) as conn:
+        return [dict(row) for row in conn.execute(query)]

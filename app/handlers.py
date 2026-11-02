@@ -10,14 +10,42 @@ from aiogram.types import (
     Message,
 )
 
-from app.config import ALLOWED_USER_ID
+from app.config import (
+    ALLOWED_USER_ID,
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    LLM_MODEL,
+    LLM_PROVIDER,
+    LLM_REASONING_EFFORT,
+    OLLAMA_MODEL,
+    OLLAMA_URL,
+)
+from app.llm import LLMClient, LLMError, build_prompt, context_from_row, make_client
 from app.runner import format_report, run_checks
-from app.storage import get_fail_rate, get_flaky_verdicts, get_recent_runs, save_run, save_triage
+from app.storage import (
+    get_fail_rate,
+    get_flaky_verdicts,
+    get_last_triage,
+    get_recent_runs,
+    save_run,
+    save_triage,
+)
 from app.triage import TriageItem, format_flaky, format_triage, triage_failures
 
 router = Router()
 RUN_LOCK = asyncio.Lock()
 MAX_TRACE_BYTES = 45 * 1024 * 1024  # лимит Telegram для файлов бота: 50 МБ
+EXPLAIN_LOCK = asyncio.Lock()
+MAX_EXPLAIN = 3  # сколько упавших проверок объяснять за один раз
+llm_client: LLMClient = make_client(
+    LLM_PROVIDER,
+    ollama_url=OLLAMA_URL,
+    ollama_model=OLLAMA_MODEL,
+    base_url=LLM_BASE_URL,
+    model=LLM_MODEL,
+    api_key=LLM_API_KEY,
+    reasoning_effort=LLM_REASONING_EFFORT,
+)
 
 
 def is_allowed(user_id: int) -> bool:
@@ -38,6 +66,9 @@ def main_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="📜 История", callback_data="history"),
                 InlineKeyboardButton(text="🔥 Нестабильные", callback_data="flaky"),
+            ],
+            [
+                InlineKeyboardButton(text="🧠 Объяснить падение", callback_data="explain"),
             ],
         ]
     )
@@ -92,6 +123,34 @@ async def run_target(message: Message, user_id: int, target: str, title: str):
     await message.answer(report[:4000], reply_markup=main_keyboard())
 
 
+async def explain_last(message: Message):
+    rows = get_last_triage()
+    if not rows:
+        await message.answer(
+            "Пока нет разобранных падений. Запусти прогон, в котором что-то упадёт.",
+            reply_markup=main_keyboard(),
+        )
+        return
+    if EXPLAIN_LOCK.locked():
+        await message.answer("Уже объясняю предыдущее падение, подожди.")
+        return
+    async with EXPLAIN_LOCK:
+        await message.answer(f"Объясняю падение моделью {llm_client.model}, это может занять до минуты...")
+        chosen = rows[:MAX_EXPLAIN]
+        for index, row in enumerate(chosen):
+            history = get_fail_rate(row["test_name"], row["target"])
+            prompt = build_prompt(context_from_row(row, history))
+            try:
+                answer = await llm_client.explain(prompt)
+            except LLMError as error:
+                await message.answer(str(error), reply_markup=main_keyboard())
+                return
+            title = row["test_name"].split("::")[-1]
+            text = f"🧠 {title}\n\n{answer}\n\n⚠️ Это гипотеза модели, проверь по скриншоту и trace."
+            is_last = index == len(chosen) - 1
+            await message.answer(text, reply_markup=main_keyboard() if is_last else None)
+
+
 async def run_from_callback(callback: CallbackQuery, target: str, title: str):
     if not is_allowed(callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
@@ -112,7 +171,8 @@ async def cmd_start(message: Message):
         "/run_ui - запустить UI-проверки\n"
         "/last - последний прогон\n"
         "/history - последние 5 прогонов\n"
-        "/flaky - нестабильные проверки\n\n"
+        "/flaky - нестабильные проверки\n"
+        "/explain - объяснить последнее падение (локальная модель)\n\n"
         "Или нажми кнопку:",
         reply_markup=main_keyboard(),
     )
@@ -166,6 +226,14 @@ async def cmd_flaky(message: Message):
     await message.answer(flaky_text(), reply_markup=main_keyboard())
 
 
+@router.message(Command("explain"))
+async def cmd_explain(message: Message):
+    if not is_allowed(user_id_of(message)):
+        await message.answer("Нет доступа.")
+        return
+    await explain_last(message)
+
+
 @router.callback_query(F.data == "run_api")
 async def cb_run_api(callback: CallbackQuery):
     await run_from_callback(callback, "checks/api", "API-проверки")
@@ -194,3 +262,13 @@ async def cb_flaky(callback: CallbackQuery):
     await callback.answer()
     if callback.message is not None:
         await callback.message.answer(flaky_text(), reply_markup=main_keyboard())
+
+
+@router.callback_query(F.data == "explain")
+async def cb_explain(callback: CallbackQuery):
+    if not is_allowed(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    await callback.answer()
+    if callback.message is not None:
+        await explain_last(callback.message)
